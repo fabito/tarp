@@ -1,0 +1,97 @@
+name: Release Go Binaries
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # Prevent other jobs from being cancelled if one fails
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install C Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y libzmq3-dev libczmq-dev libsodium-dev
+
+      - name: Install C Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install zeromq czmq libsodium
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'tarp/go.mod'
+          cache: true
+          cache-dependency-path: 'tarp/go.sum'
+
+      - name: Build
+        working-directory: ./tarp # Execute commands within the ./tarp directory
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          go mod tidy
+          
+          echo "Building version: ${RELEASE_VERSION} for ${GOOS}/${GOARCH} on Runner ${{ runner.os }}"
+          go build -v -trimpath \
+            -ldflags="-s -w -X main.version=${RELEASE_VERSION}" \
+            -o ../tarp-${{ matrix.goos }}-${{ matrix.goarch }} \
+            .
+          echo "Built binary: ../tarp-${{ matrix.goos }}-${{ matrix.goarch }}"
+
+      - name: Package Binary
+        run: |
+          ls -l tarp-${{ matrix.goos }}-${{ matrix.goarch }}
+          tar czf tarp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz tarp-${{ matrix.goos }}-${{ matrix.goarch }}
+          echo "Packaged archive: tarp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarp-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: tarp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+
+  publish:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded files
+        run: find artifacts -type f
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/**/*.tar.gz
