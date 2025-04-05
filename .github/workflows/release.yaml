@@ -53,6 +53,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           RELEASE_VERSION: ${{ github.ref_name }}
+
          # --- Static Linking & Compatibility Vars ---
           CGO_ENABLED: 1 # Ensure Cgo is active for both
           # Common static linking preference via pkg-config (works for both Linux & macOS if static libs are installed)
@@ -90,8 +91,6 @@ jobs:
             # It might show Linux standard libs like linux-vdso, libpthread, libc, ld-linux.
             ldd ../tarp-${{ matrix.goos }}-${{ matrix.goarch }} || true
           fi
-
-
 
       - name: Package Binary
         run: |
