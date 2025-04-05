@@ -53,15 +53,44 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           RELEASE_VERSION: ${{ github.ref_name }}
+
+         # --- Static Linking & Compatibility Vars ---
+          CGO_ENABLED: 1 # Ensure Cgo is active for both
+          # Common static linking preference via pkg-config (works for both Linux & macOS if static libs are installed)
+          PKG_CONFIG: "pkg-config --static"
+          # macOS specific deployment target - set ONLY if runner is macOS
+          MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '12.0' || '' }} # Sets target for macOS, empty string for Linux
+
         run: |
+          # Optional: Unset empty env vars if they cause issues, though '' is usually fine
+          # if [[ "${{ runner.os }}" != "macOS" && -z "$MACOSX_DEPLOYMENT_TARGET" ]]; then unset MACOSX_DEPLOYMENT_TARGET; fi
+
+          # Verify environment settings
+          echo "Runner OS: ${{ runner.os }}"
+          echo "Target: ${GOOS}/${GOARCH}"
+          echo "PKG_CONFIG: ${PKG_CONFIG}"
+          echo "MACOSX_DEPLOYMENT_TARGET: ${MACOSX_DEPLOYMENT_TARGET}" # Will be empty on Linux
+
           go mod tidy
-          
-          echo "Building version: ${RELEASE_VERSION} for ${GOOS}/${GOARCH} on Runner ${{ runner.os }}"
+          echo "Building version: ${RELEASE_VERSION} (Attempting Static Linking)"
+
           go build -v -trimpath \
             -ldflags="-s -w -X main.version=${RELEASE_VERSION}" \
             -o ../tarp-${{ matrix.goos }}-${{ matrix.goarch }} \
             .
+
           echo "Built binary: ../tarp-${{ matrix.goos }}-${{ matrix.goarch }}"
+
+          # --- Verification Step (OS-Specific) ---
+          echo "Checking dynamic library dependencies:"
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            # Use otool on macOS. Should NOT show libczmq, libzmq, libsodium.
+            otool -L ../tarp-${{ matrix.goos }}-${{ matrix.goarch }} || true
+          elif [[ "${{ runner.os }}" == "Linux" ]]; then
+            # Use ldd on Linux. Should NOT show libczmq, libzmq, libsodium.
+            # It might show Linux standard libs like linux-vdso, libpthread, libc, ld-linux.
+            ldd ../tarp-${{ matrix.goos }}-${{ matrix.goarch }} || true
+          fi
 
       - name: Package Binary
         run: |
